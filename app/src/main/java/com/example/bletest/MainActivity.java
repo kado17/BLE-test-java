@@ -28,6 +28,8 @@ import android.widget.TextView;
 import android.util.Log;
 import android.Manifest;
 
+import java.time.LocalTime;
+
 public class MainActivity extends AppCompatActivity {
     int count = 0;
 
@@ -146,7 +148,7 @@ public class MainActivity extends AppCompatActivity {
     public static void printAllData(BLEData[] dataArray) {
         textView.setText("");
         for (BLEData data : dataArray) {
-            textView.append(data.getAddress() + " " + data.getName() + " " + data.getRssi() + "\n");
+            textView.append(data.getAddress() + " " + data.getName() + " " + data.getRssi() + " " +data.getLocalTime()+"\n");
         }
     }
 
@@ -174,7 +176,7 @@ public class MainActivity extends AppCompatActivity {
                 ;
             }
             Log.d("scanShow", result.getDevice().getAddress());
-            BLEData tmp = new BLEData(result.getDevice().getAddress(), result.getDevice().getName(), result.getDevice().getUuids(),  result.getRssi());
+            BLEData tmp = new BLEData(result.getDevice().getAddress(), result.getDevice().getName(), result.getDevice().getUuids(),  result.getRssi(), LocalTime.now());
             bledata = updateOrAdd(bledata, tmp);
             printAllData(bledata);
 
