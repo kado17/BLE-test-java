@@ -29,9 +29,10 @@ import android.widget.TextView;
 import android.util.Log;
 import android.Manifest;
 
+import java.time.Duration;
 import java.time.LocalTime;
-
-public class MainActivity extends AppCompatActivity {
+import java.time.Instant;
+public class MainActivity2 extends AppCompatActivity {
 
     static int count = 0;
 
@@ -48,12 +49,7 @@ public class MainActivity extends AppCompatActivity {
     private BluetoothDevice device;
     static TextView textView;
 
-    public void onClick (View view){
-        Intent i = new Intent(this, MainActivity2.class);
-        startActivity(i);
-    }
-
-
+    static String testAddress = "C0:4B:13:06:1E:92";
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -94,7 +90,7 @@ public class MainActivity extends AppCompatActivity {
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
-                if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                if (ActivityCompat.checkSelfPermission(MainActivity2.this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
                     ;
                 }
                 scanner.stopScan(scancallback);
@@ -102,7 +98,7 @@ public class MainActivity extends AppCompatActivity {
                 //finish();
                 return;
             }
-        }, SCAN_PERIOD);
+        }, SCAN_PERIOD*10);
         //スキャンの開始
         scanner.startScan(scancallback);
     }
@@ -117,74 +113,26 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-    public static BLEData[] updateOrAdd(BLEData[] dataArray, BLEData newData) {
-        // dataArrayがnullの場合は新しい要素を追加して返す
-        if (dataArray == null) {
-            return new BLEData[]{newData};
-        }
-        // addressが同じ値があるかどうかを確認し、あれば更新、なければ追加する
-        boolean found = false;
-        for (int i = 0; i < dataArray.length; i++) {
-            if (dataArray[i].getAddress().equals(newData.getAddress())) {
-                // addressが一致する要素が見つかった場合は更新
-                dataArray[i] = newData;
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            // addressが一致する要素が見つからなかった場合は追加
-            dataArray = addElement(dataArray, newData);
-        }
-        return dataArray;
-    }
-
-    public static BLEData[] addElement(BLEData[] array, BLEData element) {
-        // 新しい要素を追加するために配列のサイズを拡張する
-        BLEData[] newArray = new BLEData[array.length + 1];
-        // 元の配列の要素を新しい配列にコピー
-        System.arraycopy(array, 0, newArray, 0, array.length);
-        // 新しい要素を追加
-        newArray[array.length] = element;
-        return newArray;
-    }
-
-
-    public static void printAllData(BLEData[] dataArray) {
-        textView.setText("");
-        for (BLEData data : dataArray) {
-            textView.append(data.getAddress() + " " + data.getName() + " " + data.getRssi() + " " +data.getLocalTime()+"\n");
-        }
-    }
-
-
-    /*class MyScancallback extends ScanCallback {
-        @Override
-        public void onScanResult(int callbackType, ScanResult result) {
-            Log.d("scanResult", "start" + count);
-            count += 1;
-            if (result.getDevice() == null) return;
-            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                ;
-            }
-            Log.d("scanShow", result.getDevice().getAddress());
-            textView.append(result.getDevice().getAddress() + " - " + result.getDevice().getName() + " - " + result.getDevice().getUuids()+ " - " + result.getRssi() + "\n");
-        }
-    }*/
+    private static final long TIMEOUT_DURATION_SECONDS = 5; // N秒間
+    private static Instant lastAppearanceTime = Instant.now();
     class MyScancallback extends ScanCallback {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
-            //Log.d("scanResult", "start" + count);
-            count += 1;
+
             if (result.getDevice() == null) return;
-            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            if (ActivityCompat.checkSelfPermission(MainActivity2.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
                 ;
             }
-            //Log.d("scanShow", result.getDevice().getAddress());
-            BLEData tmp = new BLEData(result.getDevice().getAddress(), result.getDevice().getName(), result.getDevice().getUuids(),  result.getRssi(), LocalTime.now());
-            bledata = updateOrAdd(bledata, tmp);
-            printAllData(bledata);
+            Log.d("scanShow", result.getDevice().getAddress());
+            if(result.getDevice().getAddress().equals(testAddress)) {
+                textView.append(result.getDevice().getAddress() + " - " + result.getDevice().getName() + " - " + result.getRssi() +" - "+ LocalTime.now() + "\n");
+                lastAppearanceTime = Instant.now();
 
+            }
+            if (Duration.between(lastAppearanceTime, Instant.now()).getSeconds() >= TIMEOUT_DURATION_SECONDS) {
+                textView.append("該当デバイスが " + TIMEOUT_DURATION_SECONDS + " 秒間検知できませんでした\n");
+                lastAppearanceTime = Instant.now();
+            }
         }
     }
 }
