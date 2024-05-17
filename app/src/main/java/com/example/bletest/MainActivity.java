@@ -12,6 +12,11 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.app.ActivityCompat;
 
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
@@ -30,29 +35,31 @@ import android.util.Log;
 import android.Manifest;
 
 import java.time.LocalTime;
+import java.util.List;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements SensorEventListener {
 
-    static int count = 0;
-
-    static BLEData[] bledata;
-    private BluetoothAdapter adapter;
-    private BluetoothLeScanner scanner;
-    private MyScancallback scancallback;
-
-    private final int PERMISSION_REQUEST = 100;
-
-    private Handler handler;
-    private final int SCAN_PERIOD = 10000;
-
-    private BluetoothDevice device;
+    private int stepcount = 0;
+    private int stepcount2 = 0;
+    private SensorManager manager;
+    private Sensor delectorSensor;
+    private Sensor stepCntSensor;
     static TextView textView;
+    static TextView textView2;
 
     public void onClick (View view){
         Intent i = new Intent(this, MainActivity2.class);
         startActivity(i);
     }
-
+    private boolean isStepCounterSensorAvailable() {
+        if (manager != null) {
+            // 歩数計センサーを取得
+            Sensor stepCounterSensor = manager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
+            // センサーが存在するかどうかを確認
+            return stepCounterSensor != null;
+        }
+        return false;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -60,131 +67,101 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         // text_view： activity_main.xml の TextView の id
         textView = findViewById(R.id.text_view);
+        textView2 = findViewById(R.id.text_view2);
 
-        // テキストを設定
-        textView.setText("");
+        SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        List<Sensor> deviceSensors = sensorManager.getSensorList(Sensor.TYPE_ALL);
 
-        //BLE対応端末かどうかを調べる。対応していない場合はメッセージを出して終了
-        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
-            Toast.makeText(this, R.string.ble_not_supported, Toast.LENGTH_SHORT).show();
-            finish();
-        }
-
-        //Bluetoothアダプターを初期化する
-        BluetoothManager manager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
-        adapter = manager.getAdapter();
-
-        //bluetoothの使用が許可されていない場合は許可を求める。
-        if (adapter == null || !adapter.isEnabled()) {
-            Intent intent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-            startActivityForResult(intent, PERMISSION_REQUEST);
-        }
-
-        // パーミッションのチェック
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1);
+        for (Sensor sensor : deviceSensors) {
+            Log.d("SensorList", sensor.getName() + ": " + sensor.getType());
         }
 
 
-        scanner = adapter.getBluetoothLeScanner();
-        scancallback = new MyScancallback();
+        //センサーマネージャを取得
+        manager = (SensorManager) getSystemService(SENSOR_SERVICE);
 
-        //スキャニングを10秒後に停止
-        handler = new Handler();
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-                    ;
-                }
-                scanner.stopScan(scancallback);
-                Log.d("scan", "SCAN_STOP");
-                //finish();
-                return;
-            }
-        }, SCAN_PERIOD);
-        //スキャンの開始
-        scanner.startScan(scancallback);
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACTIVITY_RECOGNITION}, 1);
+        }
+
+        if (isStepCounterSensorAvailable()) {
+            Toast.makeText(this, "歩数計センサーは利用可能です", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "歩数計センサーは利用できません", Toast.LENGTH_SHORT).show();
+        }
+        //センサマネージャから TYPE_STEP_DETECTOR についての情報を取得する
+        delectorSensor = manager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR);
+
+        //センサマネージャから TYPE_STEP_COUNTER についての情報を取得する
+        stepCntSensor = manager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
+
+
+        if (delectorSensor != null) {
+            manager.registerListener(this, delectorSensor, SensorManager.SENSOR_DELAY_NORMAL);
+        } else {
+            // Handle the case where the step counter sensor is not available
+            Toast.makeText(this, "Step Counter Sensor not available!", Toast.LENGTH_SHORT).show();
+        }
+
+        textView.setText("STEP_DETECTOR=");
+        textView2.setText("\nSTEP_COUNTER=");
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        Log.d("onActivityResult", "start");
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == PERMISSION_REQUEST) {
-            Log.d("onActivityResult", "permission");
-        }
-
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        // accuracy に変更があった時の処理
     }
 
-    public static BLEData[] updateOrAdd(BLEData[] dataArray, BLEData newData) {
-        // dataArrayがnullの場合は新しい要素を追加して返す
-        if (dataArray == null) {
-            return new BLEData[]{newData};
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+
+        textView.setText("\nget");
+        textView2.setText("get");
+        Sensor sensor = event.sensor;
+        float[] values = event.values;
+        long timestamp = event.timestamp;
+
+        //TYPE_STEP_COUNTER
+        if(sensor.getType() == Sensor.TYPE_STEP_COUNTER){
+            // 今までの歩数
+            Log.d("type_step_counter", String.valueOf(values[0]));
+            stepcount2++;
+            textView2.setText("\nSTEP_COUNTER=" + stepcount2 + "歩");
         }
-        // addressが同じ値があるかどうかを確認し、あれば更新、なければ追加する
-        boolean found = false;
-        for (int i = 0; i < dataArray.length; i++) {
-            if (dataArray[i].getAddress().equals(newData.getAddress())) {
-                // addressが一致する要素が見つかった場合は更新
-                dataArray[i] = newData;
-                found = true;
-                break;
+        if(sensor.getType() == Sensor.TYPE_STEP_DETECTOR){
+            // ステップを検知した場合にアクセス
+            Log.d("type_detector_counter", String.valueOf(values[0]));
+            stepcount++;
+            textView.setText("STEP_DETECTOR=" + stepcount + "歩");
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        textView.setText("\nset");
+        textView2.setText("set");
+        // リスナー設定
+        if (manager != null) {
+            if (stepCntSensor != null) {
+                boolean registered = manager.registerListener(this, stepCntSensor, SensorManager.SENSOR_DELAY_NORMAL);
+                Log.d("SensorDebug", "Step Counter registered: " + registered);
+            }
+            if (delectorSensor != null) {
+                boolean registered = manager.registerListener(this, delectorSensor, SensorManager.SENSOR_DELAY_NORMAL);
+                Log.d("SensorDebug", "Step Detector registered: " + registered);
             }
         }
-        if (!found) {
-            // addressが一致する要素が見つからなかった場合は追加
-            dataArray = addElement(dataArray, newData);
-        }
-        return dataArray;
     }
 
-    public static BLEData[] addElement(BLEData[] array, BLEData element) {
-        // 新しい要素を追加するために配列のサイズを拡張する
-        BLEData[] newArray = new BLEData[array.length + 1];
-        // 元の配列の要素を新しい配列にコピー
-        System.arraycopy(array, 0, newArray, 0, array.length);
-        // 新しい要素を追加
-        newArray[array.length] = element;
-        return newArray;
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+        // リスナー解除
+        manager.unregisterListener(this,stepCntSensor);
+        manager.unregisterListener(this,delectorSensor);
     }
 
 
-    public static void printAllData(BLEData[] dataArray) {
-        textView.setText("");
-        for (BLEData data : dataArray) {
-            textView.append(data.getAddress() + " " + data.getName() + " " + data.getRssi() + " " +data.getLocalTime()+"\n");
-        }
-    }
-
-
-    /*class MyScancallback extends ScanCallback {
-        @Override
-        public void onScanResult(int callbackType, ScanResult result) {
-            Log.d("scanResult", "start" + count);
-            count += 1;
-            if (result.getDevice() == null) return;
-            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                ;
-            }
-            Log.d("scanShow", result.getDevice().getAddress());
-            textView.append(result.getDevice().getAddress() + " - " + result.getDevice().getName() + " - " + result.getDevice().getUuids()+ " - " + result.getRssi() + "\n");
-        }
-    }*/
-    class MyScancallback extends ScanCallback {
-        @Override
-        public void onScanResult(int callbackType, ScanResult result) {
-            //Log.d("scanResult", "start" + count);
-            count += 1;
-            if (result.getDevice() == null) return;
-            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                ;
-            }
-            //Log.d("scanShow", result.getDevice().getAddress());
-            BLEData tmp = new BLEData(result.getDevice().getAddress(), result.getDevice().getName(), result.getDevice().getUuids(),  result.getRssi(), LocalTime.now());
-            bledata = updateOrAdd(bledata, tmp);
-            printAllData(bledata);
-
-        }
-    }
 }
