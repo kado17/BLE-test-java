@@ -1,270 +1,254 @@
 package com.example.bletest;
-
-import androidx.appcompat.app.AppCompatActivity;
-
-import android.os.Bundle;
-import android.os.Handler;
-
-import androidx.activity.EdgeToEdge;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
-import androidx.core.app.ActivityCompat;
-
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
-
-import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothManager;
-import android.bluetooth.le.BluetoothLeScanner;
-import android.bluetooth.le.ScanCallback;
-import android.bluetooth.le.ScanResult;
-
-import android.content.Context;
-import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.os.Looper;
-import android.view.View;
-import android.widget.Toast;
-import android.widget.TextView;
-
+import android.opengl.Matrix;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
 import android.util.Log;
-import android.Manifest;
+import android.view.View;
+import android.widget.Button;
+import android.widget.Toast;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalTime;
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
-import java.util.ArrayDeque;
-import java.util.Queue;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.util.Timer;
+import java.util.TimerTask;
 
 public class MainActivity extends AppCompatActivity implements SensorEventListener {
+
+    private static final int PERMISSION_REQUEST_CODE = 1;
     private SensorManager sensorManager;
-    static TextView textView, textView2, textView3;
-
-    private Sensor accelerometer;;
-    private static final float WALKING_THRESHOLD = 2.0f;
-
-    private Queue<Double> dataQueue = new ArrayDeque<>();
-    private final int WINDOW_SIZE = 5;
-    private Handler handler = new Handler(Looper.getMainLooper());
-    private Runnable dataProcessor;
-    private double currentAccelerometerData;
-
-    public void onClick(View view) {
-        Intent i = new Intent(this, MainActivity2.class);
-        startActivity(i);
-    }
-
-    private BluetoothAdapter adapter;
-    private BluetoothLeScanner scanner;
-    private final int PERMISSION_REQUEST = 100;
-    static String testAddress = "C0:4B:13:06:1E:92";
+    private Sensor accelerometer;
+    private Sensor magnetometer;
+    private FileWriter fileWriter;
+    private Handler handler;
+    private  Runnable runnable;
+    private float[] lastAccelerometerValues;
+    private float[] lastGeomagneticValues;
+    private Button stopButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        textView = findViewById(R.id.text_view);
-        textView2 = findViewById(R.id.text_view2);
-        textView3 = findViewById(R.id.text_view3);
-        //センサーマネージャを取得
+
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACTIVITY_RECOGNITION}, 1);
-        }
-
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
+        magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
+        stopButton = findViewById(R.id.button);
 
-        //BLE対応端末かどうかを調べる。対応していない場合はメッセージを出して終了
-        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
-            Toast.makeText(this, R.string.ble_not_supported, Toast.LENGTH_SHORT).show();
-            finish();
-        }
-
-        //Bluetoothアダプターを初期化する
-        BluetoothManager manager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
-        adapter = manager.getAdapter();
-
-        //bluetoothの使用が許可されていない場合は許可を求める。
-        if (adapter == null || !adapter.isEnabled()) {
-            Intent intent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-            startActivityForResult(intent, PERMISSION_REQUEST);
-        }
-
-        // パーミッションのチェック
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1);
-        }
-
-        scanner = adapter.getBluetoothLeScanner();
-
-
-        dataProcessor = new Runnable() {
-            @Override
-            public void run() {
-                // データをキューに追加
-                if (dataQueue.size() == WINDOW_SIZE) {
-                    dataQueue.poll(); // 古いデータを削除
-                }
-                dataQueue.add(currentAccelerometerData);
-
-                //
-                detectWalking(calculate(dataQueue));
-                // 次のデータ処理を1秒後に設定
-                handler.postDelayed(this, 1000);
+        // パーミッションのチェックとリクエスト
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, PERMISSION_REQUEST_CODE);
+            } else {
+                // パーミッションが既に許可されている場合
+                startSensor();
             }
-        };
+        } else {
+            // OSバージョンがマシュマロ以下の場合
+            startSensor();
+        }
 
-        // データ処理を開始
-        handler.post(dataProcessor);
+        // ボタンのクリックイベントリスナーを設定
+        stopButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Toast.makeText(MainActivity.this,"PUSH", Toast.LENGTH_SHORT).show();
+                Log.d("MINE", "PUSHHH");
+                stopTimer();
+                writeToFile();
+            }
+        });
     }
 
-    @Override
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {
-        // accuracy に変更があった時の処理
+    private void stopTimer() {
+        handler.removeCallbacks(runnable);
+
     }
 
     @Override
     public void onSensorChanged(SensorEvent event) {
         if (event.sensor.getType() == Sensor.TYPE_LINEAR_ACCELERATION) {
-            double x = event.values[0];
-            double y = event.values[1];
-            double z = event.values[2];
-
-            currentAccelerometerData = (float) Math.sqrt(x * x + y * y + z * z);
-
-            String str = " X= " + x + "\n"
-                    + " Y= " + y + "\n"
-                    + " Z= " + z+ "\n"
-                    + "ave= "+ currentAccelerometerData;
-            textView.setText(str);
+            lastAccelerometerValues = event.values.clone();
+        }else if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
+            lastGeomagneticValues = event.values.clone();
         }
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
-        if (accelerometer != null) {
-            sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_UI);
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        // 特に何もしない
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        sensorManager.unregisterListener(this);
+        stopTimer();
+        try {
+            if (fileWriter != null) {
+                fileWriter.close();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
     @Override
-    protected void onPause() {
-        super.onPause();
-        sensorManager.unregisterListener(this, accelerometer);
-    }
-
-
-    private double calculate(Queue<Double> queue) {
-        double sum = 0;
-        for (double data : queue) {
-            sum += data;
-        }
-        double mean =  sum / queue.size();
-        Log.d("test_ave", String.valueOf(mean));
-        //return mean;
-        double sumOfSquaredDeviations = 0.0;
-        for (double data : queue) {
-            double deviation = data - mean;
-            sumOfSquaredDeviations += deviation * deviation;
-            Log.d("test_ave2", String.valueOf(sumOfSquaredDeviations) + "  " + String.valueOf(deviation));
-        }
-        return sumOfSquaredDeviations;
-    }
-
-    private boolean isWalking = false;
-    private static final int STILL_COUNTER_THRESHOLD = 3;
-    private int stillCounter = 0;
-    private int stillCounter2 = 0;
-    private void detectWalking(double sumOfSquaredDeviations ) {
-
-        if (sumOfSquaredDeviations > WALKING_THRESHOLD) {
-            stillCounter2++;
-            if (stillCounter2 >= STILL_COUNTER_THRESHOLD && !isWalking) {
-                isWalking = true;
-                onStartWalking();
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // パーミッションが許可された場合
+                startSensor();
+            } else {
+                // パーミッションが拒否された場合
+                // 必要に応じてユーザーに通知する
             }
-            stillCounter = 0;
-        } else {
-            stillCounter++;
-            Log.d("stillCounter", String.valueOf(stillCounter));
-            if (stillCounter >= STILL_COUNTER_THRESHOLD && isWalking) {
-                isWalking = false;
-                onStopWalking();
-            }
-            stillCounter2 = 0;
         }
     }
-    private MainActivity.MyScancallback scancallback;
-    private boolean isDeviceDetection = false;
-    private void onStartWalking() {
-        // 歩き始めた時の処理
-        // 例えば、UIを更新する
-        runOnUiThread(() -> {
-            textView2.setText("onStartWalking");
-            textView3.setText("");
-        });
+
+    private void writeToFile() {
+        Log.d("MINE", "1");
+        if (fileWriterBuffer.length() > 0) {
+            Log.d("MINE", "2");
+            try {
+                // CSVファイルを作成または開く
+                File file = new File(getExternalFilesDir(null), "acceleration_data.csv");
+                fileWriter = new FileWriter(file, true); // trueで追記モード
+                fileWriter.append("timestamp,x,y,z,gx,gy,gz,azimuth(z),pitch(y),roll(x),\n"); // ヘッダーを書き込む
+                fileWriter.append(fileWriterBuffer.toString());
+                fileWriterBuffer.setLength(0); // バッファをクリア
+                fileWriter.flush();
+                fileWriter.close();
+                Log.d("MINE", "3");
+            } catch (IOException e) {
+                e.printStackTrace();
+                Log.d("MINE", e.toString());
+            }
+        }
+    }
+    private StringBuilder fileWriterBuffer = new StringBuilder(); // バッファリングのためのStringBuilder
+
+    private void startSensor() {
+        Log.d("MINE", "START");
+        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
+        sensorManager.registerListener(this, magnetometer, SensorManager.SENSOR_DELAY_NORMAL);
 
 
-        scancallback = new MainActivity.MyScancallback();
-        //スキャニングを10秒後に停止
+        // タイマーを設定して特定の秒ごとにデータを書き込む
         handler = new Handler();
-
-        handler.postDelayed(new Runnable() {
+        runnable = new Runnable() {
             @Override
             public void run() {
-                if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-                    ;
-                }
-                scanner.stopScan(scancallback);
+                if (lastAccelerometerValues != null && lastGeomagneticValues != null) {
+                    long timestamp = System.currentTimeMillis();
+                    float[] R = new float[9];
+                    float[] I = new float[9];
+                    float[] transformedGravity = new float[3];
+                    if (SensorManager.getRotationMatrix(R, I, lastAccelerometerValues, lastGeomagneticValues)) {
+                        float[] remappedR = new float[9];
+                        SensorManager.remapCoordinateSystem(R, SensorManager.AXIS_X, SensorManager.AXIS_Z, remappedR);
+                        float[] oriRad = new float[3];
+                        SensorManager.getOrientation(remappedR, oriRad);
+                        //3 つの方向角度はすべて ラジアンで表されていることに注意してください。
+                        Log.d("MINE", oriRad[0] +" "+ oriRad[1] +" "+oriRad[2]);
+                        // Multiply remappedR with gravity to get the coordinates in the user's reference frame
+                        transformedGravity[0] = remappedR[0] * lastAccelerometerValues[0] + remappedR[1] * lastAccelerometerValues[1] + remappedR[2] * lastAccelerometerValues[2];
+                        transformedGravity[1] = remappedR[3] * lastAccelerometerValues[0] + remappedR[4] * lastAccelerometerValues[1] + remappedR[5] * lastAccelerometerValues[2];
+                        transformedGravity[2] = remappedR[6] * lastAccelerometerValues[0] + remappedR[7] * lastAccelerometerValues[1] + remappedR[8] * lastAccelerometerValues[2];
 
-                if (isDeviceDetection){
-                    textView3.setText("発見");
-                }else{
-                    textView3.setText("未発見");
+                        //////////////////////////
+/*
+                        float[] R2 = new float[16];
+                        float[] I2 = new float[16];
+                        SensorManager.getRotationMatrix(R2, I2, lastAccelerometerValues, lastGeomagneticValues);
+                        float[] worldAcceleration = new float[4]; // ホモジニアス座標を使用します
+                        float[] deviceAcceleration = new float[4];
+                        deviceAcceleration[0] = lastAccelerometerValues[0];
+                        deviceAcceleration[1] = lastAccelerometerValues[1];
+                        deviceAcceleration[2] = lastAccelerometerValues[2];
+                        deviceAcceleration[3] = 0; // ホモジニアス座標のw成分を追加します
+                        float[] inverseRotationMatrix = new float[16];
+                        // 回転行列の逆行列を作成する
+                        android.opengl.Matrix.invertM(inverseRotationMatrix, 0, R2, 0);
+                        // デバイス座標系の加速度データを世界座標系に変換
+                        android.opengl.Matrix.multiplyMV(worldAcceleration, 0, inverseRotationMatrix, 0, deviceAcceleration, 0);
+                        /*float acc[] = new float[3];
+                        for (int i=0; i<3; i++) acc[i] = worldAcceleration[i];
+                        String data2 = timestamp + "," + lastAccelerometerValues[0] + "," + lastAccelerometerValues[1] + "," + lastAccelerometerValues[2]
+                                + "," + worldAcceleration[0] + "," + worldAcceleration[1] + "," + worldAcceleration[2] + "\n";
+                        Log.d("MINE2", data2);
+                        */
+                        /////////////////////
+                        test( lastAccelerometerValues, lastGeomagneticValues, timestamp);
+
+
+                        /////////////////////////////////////////
+                        String data = timestamp + "," + lastAccelerometerValues[0] + "," + lastAccelerometerValues[1] + "," + lastAccelerometerValues[2]
+                                + "," + transformedGravity[0] + "," + transformedGravity[1] + "," + transformedGravity[2] + "\n";
+                        //fileWriterBuffer.append(data);
+                        Log.d("MINE", data);
+
+                    }
                 }
-                isDeviceDetection = false;
-                Log.d("scanShow", "-------------------------");
-                //finish();
-                return;
+                handler.postDelayed(this, 100);
             }
-        }, 1000*5*2);
-        //スキャンの開始
-        scanner.startScan(scancallback);
-
+        };
+        handler.post(runnable);
     }
 
-    class MyScancallback extends ScanCallback {
-        @Override
-        public void onScanResult(int callbackType, ScanResult result) {
+    public void test(float[] lastAccelerometerValues, float[] lastGeomagneticValues, long timestamp){
+         int MATRIX_SIZE = 16;
+        float[] R  = new float[MATRIX_SIZE];
+        float[] I  = new float[MATRIX_SIZE];
+        float[] rR = new float[MATRIX_SIZE];
 
-            if (result.getDevice() == null) return;
-            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                ;
-            }
-            Log.d("scanShow", result.getDevice().getAddress());
-            if(result.getDevice().getAddress().equals(testAddress)) {
-                Log.d("onActivityResult", result.getDevice().getAddress() + " - " + result.getDevice().getName() + " - " + result.getRssi());
-                isDeviceDetection = true;
-            }
-        }
+        SensorManager.getRotationMatrix(R, I, lastAccelerometerValues, lastGeomagneticValues);
+        SensorManager.remapCoordinateSystem(R, SensorManager.AXIS_X, SensorManager.AXIS_Z, rR);
+        float[] oriRad = new float[3];
+        SensorManager.getOrientation(rR, oriRad);
+        //azimuth(z), pitch(y), roll(x) ラジアン
+        //3 つの方向角度はすべて ラジアンで表されていることに注意してください。
+        Log.d("MINE3", oriRad[0] +" "+ oriRad[1] +" "+oriRad[2]);
+        float[] acc  = new float[3];
+        float[] deviceAcceleration = new float[4];
+        deviceAcceleration[0] = lastAccelerometerValues[0];
+        deviceAcceleration[1] = lastAccelerometerValues[1];
+        deviceAcceleration[2] = lastAccelerometerValues[2];
+        deviceAcceleration[3] = 0; // ホモジニアス座標のw成分を追加します
+
+        float[] invertR = new float[16];
+        Matrix.invertM(invertR, 0, R, 0);
+
+
+        float[] acc4 = new float[4];
+        Matrix.multiplyMV(acc4, 0, invertR, 0, deviceAcceleration, 0);
+
+
+        for (int i=0; i<3; i++) acc[i] = acc4[i];
+        String data2 = BigDecimal.valueOf(timestamp).toPlainString() + "," + toNotE(lastAccelerometerValues[0]) + "," + toNotE(lastAccelerometerValues[1]) + "," + toNotE(lastAccelerometerValues[2])
+                + "," + toNotE(acc[0]) + "," + toNotE(acc[1]) + "," + toNotE(acc[2])
+                + "," + toNotE(oriRad[0]) + "," + toNotE(oriRad[1]) + "," + toNotE(oriRad[2])
+                + "\n";
+        Log.d("MINE3", data2);
+        fileWriterBuffer.append(data2);
     }
 
-
-
-
-    private void onStopWalking() {
-        // 歩き止めた時の処理
-        // 例えば、UIを更新する
-        runOnUiThread(() -> {
-            // ここにUI更新コードを追加
-            textView2.setText("Not walking");
-        });
+    String toNotE (float f){
+        return BigDecimal.valueOf(f).toPlainString();
     }
 }
